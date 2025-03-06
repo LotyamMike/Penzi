@@ -1,5 +1,9 @@
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey
+from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
+
 
 db = SQLAlchemy()
 
@@ -109,3 +113,4 @@ class UserMoreDetails(db.Model):
     ethnicity = db.Column(db.String(100))
     created_at = db.Column(db.TIMESTAMP, server_default=db.func.current_timestamp())
     modified_at = db.Column(db.TIMESTAMP, server_default=db.func.current_timestamp(), onupdate=db.func.current_timestamp())
+
