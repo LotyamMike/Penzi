@@ -1,6 +1,6 @@
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Boolean
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -113,4 +113,19 @@ class UserMoreDetails(db.Model):
     ethnicity = db.Column(db.String(100))
     created_at = db.Column(db.TIMESTAMP, server_default=db.func.current_timestamp())
     modified_at = db.Column(db.TIMESTAMP, server_default=db.func.current_timestamp(), onupdate=db.func.current_timestamp())
+
+class MatchBatch(db.Model):
+    __tablename__ = 'match_batches'
+
+    id = db.Column(db.Integer, primary_key=True)
+    request_id = db.Column(db.Integer, db.ForeignKey('match_requests.id'))
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'))
+    total_matches = db.Column(db.Integer)
+    matches_shown = db.Column(db.Integer, default=0)
+    match_data = db.Column(db.Text)
+    created_at = db.Column(db.TIMESTAMP, default=db.func.now())
+
+    # Relationships
+    request = db.relationship("MatchRequest", backref="match_batches")
+    user = db.relationship("User", backref="match_batches")
 

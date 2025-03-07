@@ -1,9 +1,10 @@
 from flask import Flask, request, jsonify
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import create_engine, and_, or_, func
-from models import User, UserMoreDetails, UserSelfDescription, MatchRequest, MatchConfirmation, Message, Match
+from models import User, UserMoreDetails, UserSelfDescription, MatchRequest, MatchConfirmation, Message, Match, MatchBatch
 from contextlib import contextmanager
 from typing import List, Optional
+import json
 
 app = Flask(__name__)
 
@@ -110,9 +111,31 @@ def register_user():
                 displayed=False
             )
             session.add(initial_match)
+            session.flush()
+
+            # Store the incoming registration message
+            incoming_message = Message(
+                user_id=new_user.id,
+                message_direction="incoming",
+                message_text=message
+            )
+            session.add(incoming_message)
+
+            # Response message
+            response_text = f"Your profile has been created successfully {name}.\nSMS details#levelOfEducation#profession#maritalStatus#religion#ethnicity to 22141.\nE.g. details#diploma#driver#single#christian#mijikenda"
+
+            # Store the outgoing response message
+            outgoing_message = Message(
+                user_id=new_user.id,
+                message_direction="outgoing",
+                message_text=response_text
+            )
+            session.add(outgoing_message)
+
+            session.commit()
 
             return jsonify({
-                "message": f"Your profile has been created successfully {name}.\nSMS details#levelOfEducation#profession#maritalStatus#religion#ethnicity to 22141.\nE.g. details#diploma#driver#single#christian#mijikenda",
+                "message": response_text,
                 "user_id": new_user.id
             }), 201
 
@@ -154,8 +177,29 @@ def add_more_details():
             session.add(more_details)
             session.flush()
 
+            # Store the incoming details message
+            incoming_message = Message(
+                user_id=user_id,
+                message_direction="incoming",
+                message_text=message
+            )
+            session.add(incoming_message)
+
+            # Response message
+            response_text = "This is the last stage of registration.\nSMS a brief description of yourself to 22141 starting with the word MYSELF.\nE.g., MYSELF chocolate, lovely, sexy etc."
+
+            # Store the outgoing response message
+            outgoing_message = Message(
+                user_id=user_id,
+                message_direction="outgoing",
+                message_text=response_text
+            )
+            session.add(outgoing_message)
+
+            session.commit()
+
             return jsonify({
-                "message": "This is the last stage of registration.\nSMS a brief description of yourself to 22141 starting with the word MYSELF.\nE.g., MYSELF chocolate, lovely, sexy etc."
+                "message": response_text
             }), 201
 
     except Exception as e:
@@ -187,8 +231,29 @@ def add_self_description():
             session.add(self_desc)
             session.flush()
 
+            # Store the incoming self-description message
+            incoming_message = Message(
+                user_id=user_id,
+                message_direction="incoming",
+                message_text=message
+            )
+            session.add(incoming_message)
+
+            # Response message
+            response_text = "You are now registered for dating.\nTo search for a MPENZI, SMS match#age#town to 22141 and meet the person of your dreams.\nE.g., match#23-25#Kisumu"
+
+            # Store the outgoing response message
+            outgoing_message = Message(
+                user_id=user_id,
+                message_direction="outgoing",
+                message_text=response_text
+            )
+            session.add(outgoing_message)
+
+            session.commit()
+
             return jsonify({
-                "message": "You are now registered for dating.\nTo search for a MPENZI, SMS match#age#town to 22141 and meet the person of your dreams.\nE.g., match#23-25#Kisumu"
+                "message": response_text
             }), 201
 
     except Exception as e:
@@ -199,52 +264,11 @@ def request_match():
     try:
         data = request.get_json()
         phone_number = data.get("from")
-        message = data.get("message", "").strip()
+        message = data.get("message", "")
 
-        # Check if this is a phone number query
-        if message and message.isdigit():
-            with get_session() as session:
-                # First find the requesting user's gender
-                requester_match = session.query(Match).filter(
-                    Match.phone_number.like(f"%{phone_number[-9:]}")
-                ).first()
-
-                if not requester_match:
-                    return jsonify({"message": "Please register first"}), 404
-
-                requesting_user = session.query(User).get(requester_match.matched_user_id)
-                if not requesting_user:
-                    return jsonify({"message": "User not found"}), 404
-
-                # Find user with the requested phone number
-                target_match = session.query(Match).filter(
-                    Match.phone_number.like(f"%{message[-9:]}")
-                ).first()
-
-                if not target_match:
-                    return jsonify({"message": "User not found with that number"}), 404
-
-                target_user = session.query(User).get(target_match.matched_user_id)
-                if not target_user:
-                    return jsonify({"message": "User details not found"}), 404
-
-                # Ensure the target user is of opposite gender
-                if target_user.gender == requesting_user.gender:
-                    return jsonify({
-                        "message": "Invalid request. Please try another number."
-                    }), 400
-
-                # Format the user details
-                response = (
-                    f"{target_user.name} aged {target_user.age}, "
-                    f"{target_user.county} County, {target_user.town} town, "
-                    f"{target_user.occupation}, {target_user.education}, "
-                    f"{target_user.marital_status}, {target_user.religion}, "
-                    f"{target_user.tribe}."
-                )
-                response += f"\nSend DESCRIBE {target_match.phone_number} to get more details about {target_user.name}"
-
-                return jsonify({"message": response}), 200
+        print("\n=== DEBUG INFO ===")
+        print(f"Phone: {phone_number}")
+        print(f"Message: {message}")
 
         if not message.upper().startswith("MATCH#"):
             return jsonify({
@@ -260,9 +284,18 @@ def request_match():
         _, age_range, town = parts
 
         with get_session() as session:
+            # Debug: Print all users
+            all_users = session.query(User).all()
+            print("\nAll Users in Database:")
+            for user in all_users:
+                print(f"- {user.name}, Age: {user.age}, Gender: {user.gender}, County: {user.county}")
+
             # Find requesting user
             requester_match = session.query(Match).filter(
-                Match.phone_number.like(f"%{phone_number[-9:]}")
+                or_(
+                    Match.phone_number == phone_number,
+                    Match.phone_number.like(f"%{phone_number[-9:]}")
+                )
             ).first()
 
             if not requester_match:
@@ -271,6 +304,8 @@ def request_match():
             requesting_user = session.query(User).get(requester_match.matched_user_id)
             if not requesting_user:
                 return jsonify({"message": "User not found"}), 404
+
+            print(f"\nRequesting User: {requesting_user.name}, Gender: {requesting_user.gender}")
 
             try:
                 min_age, max_age = map(int, age_range.split('-'))
@@ -281,80 +316,119 @@ def request_match():
                     "message": "Invalid age range format. Use: min-max (e.g., 23-25)"
                 }), 400
 
-            # Find total matches first
+            # Simple direct query to find matches
             opposite_gender = "Female" if requesting_user.gender == "Male" else "Male"
             
-            # Find matches
-            matches = session.query(User).filter(
+            print(f"\nSearching for:")
+            print(f"- Gender: {opposite_gender}")
+            print(f"- Age Range: {min_age}-{max_age}")
+            print(f"- County: {town}")
+
+            # First get matching users
+            matching_users = session.query(User).filter(
                 User.gender == opposite_gender,
                 User.age.between(min_age, max_age),
-                User.county == town,
-                User.id != requesting_user.id
+                func.lower(User.county) == func.lower(town)
             ).all()
 
-            if not matches:
+            print(f"\nFound {len(matching_users)} users matching criteria:")
+            for user in matching_users:
+                print(f"- {user.name}, Age: {user.age}, Gender: {user.gender}, County: {user.county}")
+
+            # Create a new match request record with correct column names
+            match_request = MatchRequest(
+                user_id=requesting_user.id,
+                age_range=age_range,
+                county=town,  # Changed to match the actual column name
+                status="Pending"
+            )
+            session.add(match_request)
+            session.flush()  # Get the ID without committing
+
+            # Get matching users and their phone numbers
+            matches = []
+            match_data = []  # For storing in match_batches
+            
+            for user in matching_users:
+                latest_match = session.query(Match).filter(
+                    Match.matched_user_id == user.id,
+                    Match.phone_number != None
+                ).order_by(Match.id.desc()).first()
+                
+                if latest_match and latest_match.phone_number:
+                    matches.append((user, latest_match))
+                    # Store match data for batch processing
+                    match_data.append({
+                        "name": user.name,
+                        "age": user.age,
+                        "phone": latest_match.phone_number,
+                        "user_id": user.id
+                    })
+
+            total_matches = len(matches)
+
+            if total_matches == 0:
                 return jsonify({
                     "message": f"No {opposite_gender.lower()} matches found in {town} between ages {min_age}-{max_age}"
                 }), 200
 
-            total_matches = len(matches)
+            # Create match batch record
+            match_batch = MatchBatch(
+                request_id=match_request.id,
+                user_id=requesting_user.id,
+                total_matches=total_matches,
+                matches_shown=min(3, total_matches),  # Initial matches shown
+                match_data=json.dumps(match_data)
+            )
+            session.add(match_batch)
 
-            # Format response
+            # Format initial message
             if opposite_gender == "Female":
                 gender_term = "lady" if total_matches == 1 else "ladies"
             else:
                 gender_term = "man" if total_matches == 1 else "men"
 
-            # Initial message
             initial_message = f"We have {total_matches} {gender_term} who match your choice!"
             if total_matches > 3:
-                initial_message += " We will send you details of 3 of them shortly."
+                initial_message += "\nWe will send you details of 3 of them shortly."
             initial_message += f"\nTo get more details about a {gender_term}, SMS their number e.g., 0722010203 to 22141"
 
             # Format match details (first 3)
             match_details = []
             display_matches = matches[:3] if total_matches > 3 else matches
             
-            for user in display_matches:
-                match_record = session.query(Match).filter(
-                    Match.matched_user_id == user.id
-                ).order_by(Match.id.desc()).first()
-                phone = match_record.phone_number if match_record else "N/A"
-                match_details.append(f"{user.name} aged {user.age}, {phone}.")
+            for user, match in display_matches:
+                match_details.append(f"{user.name} aged {user.age}, {match.phone_number}.")
+
+            # Store the message
+            incoming_message = Message(
+                user_id=requesting_user.id,
+                message_direction="incoming",
+                message_text=message
+            )
+            session.add(incoming_message)
 
             # Combine messages
-            response = initial_message + "\n" + "\n".join(match_details)
+            response = initial_message + "\n\n" + "\n".join(match_details)
 
             # Add NEXT instruction if more than 3 matches
             if total_matches > 3:
                 remaining = total_matches - 3
-                response += f"\nSend NEXT to 22141 to receive details of the remaining {remaining} {gender_term}"
+                response += f"\n\nSend NEXT to 22141 to receive details of the remaining {remaining} {gender_term}"
 
+            # Store the response message
+            outgoing_message = Message(
+                user_id=requesting_user.id,
+                message_direction="outgoing",
+                message_text=response
+            )
+            session.add(outgoing_message)
+
+            session.commit()
             return jsonify({"message": response}), 200
 
     except Exception as e:
         print(f"Error: {str(e)}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route("/messages/<int:user_id>", methods=["GET"])
-def get_messages(user_id):
-    try:
-        with get_session() as session:
-            # Verify user exists
-            user = session.query(User).get(user_id)
-            if not user:
-                return jsonify({"error": "User not found"}), 404
-
-            messages = session.query(Message).filter(
-                or_(Message.sender_id == user_id, Message.receiver_id == user_id)
-            ).order_by(Message.created_at.desc()).all()
-
-            return jsonify({
-                "messages": [msg.serialize() for msg in messages],
-                "total_messages": len(messages)
-            }), 200
-
-    except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 @app.route("/next-matches", methods=["POST"])
@@ -368,61 +442,85 @@ def get_next_matches():
             return jsonify({"message": "Invalid command. Send NEXT to get more matches"}), 400
 
         with get_session() as session:
-            # Find the user's latest match request
-            match_record = session.query(Match).filter_by(phone_number=phone_number).first()
-            if not match_record:
+            # Get the requesting user's match record
+            requesting_match = session.query(Match).filter_by(
+                phone_number=phone_number
+            ).first()
+
+            if not requesting_match:
                 return jsonify({"message": "No active match request found"}), 404
 
-            # Get the latest match request
-            latest_request = session.query(MatchRequest).filter_by(
-                user_id=match_record.matched_user_id
-            ).order_by(MatchRequest.id.desc()).first()
+            # Get the latest match batch for this user
+            match_batch = session.query(MatchBatch).filter_by(
+                user_id=requesting_match.matched_user_id
+            ).order_by(MatchBatch.id.desc()).first()
 
-            if not latest_request:
+            if not match_batch:
                 return jsonify({"message": "No active match request found"}), 404
 
-            # Get next 3 undisplayed matches
-            matches = session.query(User).filter(
-                User.id.in_(
-                    session.query(Match.matched_user_id)
-                    .filter_by(request_id=latest_request.id, displayed=False)
+            # Load match data
+            import json
+            match_data = json.loads(match_batch.match_data)
+
+            # Get remaining matches
+            remaining_matches = match_data[match_batch.matches_shown:]
+
+            if not remaining_matches:
+                response_text = "No more matches available"
+                outgoing_message = Message(
+                    user_id=requesting_match.matched_user_id,
+                    message_direction="outgoing",
+                    message_text=response_text
                 )
-            ).limit(3).all()
+                session.add(outgoing_message)
+                session.commit()
+                return jsonify({"message": response_text}), 200
 
-            if not matches:
-                return jsonify({"message": "No more matches available"}), 200
-
-            # Mark these matches as displayed
-            for match in matches:
-                match_record = session.query(Match).filter_by(
-                    request_id=latest_request.id,
-                    matched_user_id=match.id
-                ).first()
-                if match_record:
-                    match_record.displayed = True
-
-            # Format response
+            # Take next 2 matches
+            current_batch = remaining_matches[:2]
+            
+            # Format match details
             match_details = []
-            for match in matches:
-                match_phone = session.query(Match.phone_number).filter_by(
-                    matched_user_id=match.id
-                ).first()
-                match_details.append(f"{match.name} aged {match.age}, {match_phone[0]}")
+            for match in current_batch:
+                match_details.append(f"{match['name']} aged {match['age']}, {match['phone']}")
 
             response = "\n".join(match_details)
 
-            # Count remaining undisplayed matches
-            remaining = session.query(Match).filter_by(
-                request_id=latest_request.id,
-                displayed=False
-            ).count()
+            # Update matches shown count
+            match_batch.matches_shown += len(current_batch)
+
+            # Calculate remaining matches
+            remaining = len(remaining_matches) - len(current_batch)
 
             if remaining > 0:
-                response += f"\nSend NEXT to 22141 to receive details of the remaining {remaining} matches"
+                # Get gender info for proper terminology
+                requesting_user = session.query(User).get(requesting_match.matched_user_id)
+                opposite_gender = "Female" if requesting_user.gender == "Male" else "Male"
+                remaining_term = "lady" if opposite_gender == "Female" and remaining == 1 else \
+                               "ladies" if opposite_gender == "Female" else \
+                               "man" if remaining == 1 else "men"
+                response += f"\nSend NEXT to 22141 to receive details of the remaining {remaining} {remaining_term}"
+
+            # Store messages
+            incoming_message = Message(
+                user_id=requesting_match.matched_user_id,
+                message_direction="incoming",
+                message_text=message
+            )
+            session.add(incoming_message)
+
+            outgoing_message = Message(
+                user_id=requesting_match.matched_user_id,
+                message_direction="outgoing",
+                message_text=response
+            )
+            session.add(outgoing_message)
+            session.commit()
 
             return jsonify({"message": response}), 200
 
     except Exception as e:
+        print(f"Error in next-matches: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 @app.route("/profile-details", methods=["POST"])
@@ -444,27 +542,66 @@ def request_profile():
             if not requester:
                 return jsonify({"message": "User not found"}), 404
 
+            # Store incoming message
+            incoming_message = Message(
+                user_id=requester.id,
+                message_direction="incoming",
+                message_text=target_phone
+            )
+            session.add(incoming_message)
+
             # Get target user details
             target_match = session.query(Match).filter(
                 Match.phone_number.like(f"%{target_phone[-9:]}")
             ).first()
             if not target_match:
-                return jsonify({"message": "User not found with that number"}), 404
+                error_msg = "User not found with that number"
+                # Store error response
+                outgoing_message = Message(
+                    user_id=requester.id,
+                    message_direction="outgoing",
+                    message_text=error_msg
+                )
+                session.add(outgoing_message)
+                session.commit()
+                return jsonify({"message": error_msg}), 404
 
             target_user = session.query(User).get(target_match.matched_user_id)
             if not target_user:
-                return jsonify({"message": "User details not found"}), 404
+                error_msg = "User details not found"
+                outgoing_message = Message(
+                    user_id=requester.id,
+                    message_direction="outgoing",
+                    message_text=error_msg
+                )
+                session.add(outgoing_message)
+                session.commit()
+                return jsonify({"message": error_msg}), 404
 
             # Get more details for target user
             target_more_details = session.query(UserMoreDetails).filter_by(user_id=target_user.id).first()
             if not target_more_details:
-                return jsonify({"message": "User details not found"}), 404
+                error_msg = "User details not found"
+                outgoing_message = Message(
+                    user_id=requester.id,
+                    message_direction="outgoing",
+                    message_text=error_msg
+                )
+                session.add(outgoing_message)
+                session.commit()
+                return jsonify({"message": error_msg}), 404
 
             # Ensure users are of opposite gender
             if target_user.gender == requester.gender:
-                return jsonify({
-                    "message": "Invalid request. Please try another number."
-                }), 400
+                error_msg = "Invalid request. Please try another number."
+                outgoing_message = Message(
+                    user_id=requester.id,
+                    message_direction="outgoing",
+                    message_text=error_msg
+                )
+                session.add(outgoing_message)
+                session.commit()
+                return jsonify({"message": error_msg}), 400
 
             # Message for requester
             requester_message = (
@@ -475,6 +612,14 @@ def request_profile():
                 f"{target_more_details.ethnicity}. "
                 f"Send DESCRIBE {target_match.phone_number} to get more details about {target_user.name}."
             )
+
+            # Store response message for requester
+            outgoing_message = Message(
+                user_id=requester.id,
+                message_direction="outgoing",
+                message_text=requester_message
+            )
+            session.add(outgoing_message)
 
             # Set gender-specific terms
             gender_term = "man" if requester.gender == "Male" else "woman"
@@ -488,6 +633,16 @@ def request_profile():
                 f"{pronoun} is aged {requester.age} based in {requester.county}.\n"
                 f"Do you want to know more about {pronoun_obj}? Send YES to 22141"
             )
+
+            # Store notification message for target user
+            notification_msg = Message(
+                user_id=target_user.id,
+                message_direction="outgoing",
+                message_text=notification_message
+            )
+            session.add(notification_msg)
+
+            session.commit()
 
             return jsonify({
                 "message": requester_message,
@@ -508,16 +663,6 @@ def get_description():
         requester_phone = data.get("from")
         message = data.get("message", "")
 
-        # Check if message starts with DESCRIBE
-        if not message.startswith("DESCRIBE"):
-            return jsonify({"message": "Invalid format. Use: DESCRIBE phone_number"}), 400
-        # Extract phone number from message
-        parts = message.split()
-        if len(parts) != 2:
-            return jsonify({"message": "Invalid format. Use: DESCRIBE phone_number"}), 400
-
-        target_phone = parts[1]
-
         with get_session() as session:
             # Find requesting user - handle different phone number formats
             requester_match = session.query(Match).filter(
@@ -527,20 +672,73 @@ def get_description():
             if not requester_match:
                 return jsonify({"message": "Please register first"}), 404
 
+            requester = session.query(User).get(requester_match.matched_user_id)
+
+            # Store incoming message
+            incoming_message = Message(
+                user_id=requester.id,
+                message_direction="incoming",
+                message_text=message
+            )
+            session.add(incoming_message)
+
+            # Check if message starts with DESCRIBE
+            if not message.startswith("DESCRIBE"):
+                error_msg = "Invalid format. Use: DESCRIBE phone_number"
+                outgoing_message = Message(
+                    user_id=requester.id,
+                    message_direction="outgoing",
+                    message_text=error_msg
+                )
+                session.add(outgoing_message)
+                session.commit()
+                return jsonify({"message": error_msg}), 400
+
+            # Extract phone number from message
+            parts = message.split()
+            if len(parts) != 2:
+                error_msg = "Invalid format. Use: DESCRIBE phone_number"
+                outgoing_message = Message(
+                    user_id=requester.id,
+                    message_direction="outgoing",
+                    message_text=error_msg
+                )
+                session.add(outgoing_message)
+                session.commit()
+                return jsonify({"message": error_msg}), 400
+
+            target_phone = parts[1]
+
             # Find target user - handle different phone number formats
             target_match = session.query(Match).filter(
                 Match.phone_number.like(f"%{target_phone[-9:]}")  # Match last 9 digits
             ).first()
 
             if not target_match:
-                return jsonify({"message": "User not found"}), 404
+                error_msg = "User not found"
+                outgoing_message = Message(
+                    user_id=requester.id,
+                    message_direction="outgoing",
+                    message_text=error_msg
+                )
+                session.add(outgoing_message)
+                session.commit()
+                return jsonify({"message": error_msg}), 404
 
             target_user = session.query(User).get(target_match.matched_user_id)
             
             # Get description from UserSelfDescription table
             user_description = session.query(UserSelfDescription).filter_by(user_id=target_user.id).first()
             if not user_description:
-                return jsonify({"message": "Description not found"}), 404
+                error_msg = "Description not found"
+                outgoing_message = Message(
+                    user_id=requester.id,
+                    message_direction="outgoing",
+                    message_text=error_msg
+                )
+                session.add(outgoing_message)
+                session.commit()
+                return jsonify({"message": error_msg}), 404
 
             # Set pronoun based on gender
             pronoun = "himself" if target_user.gender == "Male" else "herself"
@@ -550,9 +748,19 @@ def get_description():
                 f"{target_user.name} describes {pronoun} as {user_description.description}"
             )
 
+            # Store outgoing response message
+            outgoing_message = Message(
+                user_id=requester.id,
+                message_direction="outgoing",
+                message_text=response
+            )
+            session.add(outgoing_message)
+            session.commit()
+
             return jsonify({"message": response}), 200
 
     except Exception as e:
+        print(f"Error: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 @app.route("/confirm-interest", methods=["POST"])
@@ -561,9 +769,6 @@ def confirm_interest():
         data = request.get_json()
         responder_phone = data.get("from")
         message = data.get("message", "")
-
-        if message.upper() != "YES":
-            return jsonify({"message": "Invalid format. Please reply with YES"}), 400
 
         with get_session() as session:
             # Find the user who was requested (the responder)
@@ -576,6 +781,25 @@ def confirm_interest():
 
             responder = session.query(User).get(responder_match.matched_user_id)
 
+            # Store incoming YES message
+            incoming_message = Message(
+                user_id=responder.id,
+                message_direction="incoming",
+                message_text=message
+            )
+            session.add(incoming_message)
+
+            if message.upper() != "YES":
+                error_msg = "Invalid format. Please reply with YES"
+                outgoing_message = Message(
+                    user_id=responder.id,
+                    message_direction="outgoing",
+                    message_text=error_msg
+                )
+                session.add(outgoing_message)
+                session.commit()
+                return jsonify({"message": error_msg}), 400
+
             # Find who requested their details (the requester)
             latest_request = session.query(MatchRequest).filter(
                 MatchRequest.county == responder.county,
@@ -583,20 +807,52 @@ def confirm_interest():
             ).order_by(MatchRequest.id.desc()).first()
 
             if not latest_request:
-                return jsonify({"message": "No pending requests found"}), 404
+                error_msg = "No pending requests found"
+                outgoing_message = Message(
+                    user_id=responder.id,
+                    message_direction="outgoing",
+                    message_text=error_msg
+                )
+                session.add(outgoing_message)
+                session.commit()
+                return jsonify({"message": error_msg}), 404
 
             # Get the requester's details
             requester = session.query(User).get(latest_request.user_id)
             if not requester:
-                return jsonify({"message": "Requester not found"}), 404
+                error_msg = "Requester not found"
+                outgoing_message = Message(
+                    user_id=responder.id,
+                    message_direction="outgoing",
+                    message_text=error_msg
+                )
+                session.add(outgoing_message)
+                session.commit()
+                return jsonify({"message": error_msg}), 404
 
             requester_match = session.query(Match).filter_by(matched_user_id=requester.id).first()
             if not requester_match:
-                return jsonify({"message": "Requester match not found"}), 404
+                error_msg = "Requester match not found"
+                outgoing_message = Message(
+                    user_id=responder.id,
+                    message_direction="outgoing",
+                    message_text=error_msg
+                )
+                session.add(outgoing_message)
+                session.commit()
+                return jsonify({"message": error_msg}), 404
 
             requester_details = session.query(UserMoreDetails).filter_by(user_id=requester.id).first()
             if not requester_details:
-                return jsonify({"message": "Requester details not found"}), 404
+                error_msg = "Requester details not found"
+                outgoing_message = Message(
+                    user_id=responder.id,
+                    message_direction="outgoing",
+                    message_text=error_msg
+                )
+                session.add(outgoing_message)
+                session.commit()
+                return jsonify({"message": error_msg}), 404
 
             # Format response exactly as specified
             response = (
@@ -607,6 +863,13 @@ def confirm_interest():
                 f"Send DESCRIBE {requester_match.phone_number} to get more details about {requester.name}"
             )
 
+            # Store outgoing response message
+            outgoing_message = Message(
+                user_id=responder.id,
+                message_direction="outgoing",
+                message_text=response
+            )
+            session.add(outgoing_message)
             
             latest_request.status = "1"  
             session.commit()
@@ -614,7 +877,10 @@ def confirm_interest():
             return jsonify({"message": response}), 200
 
     except Exception as e:
+        print(f"Error: {str(e)}")
         return jsonify({"error": str(e)}), 500
+
+
 
 if __name__ == "__main__":
     app.run(debug=True, port=5001)
